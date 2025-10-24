@@ -1,0 +1,12 @@
+
+reflex==0.8.17a1
+python-binance
+polar-sdk-python
+polar_sdk
+polar-sdk
+fastapi
+sqlalchemy
+alembic
+cryptography
+bcrypt
+resend
