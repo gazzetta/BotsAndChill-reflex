@@ -111,7 +111,7 @@ class BotsState(rx.State):
         return base_order_cost + safety_orders_cost
 
     @rx.event
-    async def add_bot(self):
+    async def add_bot(self, form_data: dict):
         from app.states.exchange_state import ExchangeState
 
         auth_state = await self.get_state(AuthState)
@@ -125,6 +125,17 @@ class BotsState(rx.State):
             return rx.toast.info(
                 "You have reached the maximum bot limit for your PRO plan."
             )
+        for key, value in form_data.items():
+            if key in self.current_bot_config and value:
+                try:
+                    if key == "max_safety_orders" or key == "immediate_safety_orders":
+                        self.current_bot_config[key] = int(value)
+                    elif key != "pair_search_input":
+                        self.current_bot_config[key] = float(value)
+                except (ValueError, TypeError) as e:
+                    logging.exception(
+                        f"Could not convert form value {value} for {key}: {e}"
+                    )
         exchange_state = await self.get_state(ExchangeState)
         balance_ok, current_balance = await exchange_state.validate_balance(
             "USDT", self.required_balance

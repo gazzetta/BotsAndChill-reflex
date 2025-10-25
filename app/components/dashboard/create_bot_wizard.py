@@ -37,16 +37,14 @@ def config_input_field(
     label: str, name: str, value: rx.Var, type: str = "number"
 ) -> rx.Component:
     return rx.el.div(
-        rx.el.label(
-            label, htmlFor=name, class_name="block text-sm font-medium text-gray-700"
-        ),
+        rx.el.p(label, class_name="block text-sm font-medium text-gray-700"),
         rx.el.input(
             type=type,
             name=name,
             id=name,
-            default_value=value,
             on_change=lambda value: BotsState.update_bot_config_field(name, value),
             class_name="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm",
+            default_value=value.to_string(),
         ),
     )
 
@@ -61,41 +59,46 @@ def create_bot_wizard() -> rx.Component:
                     "Trading Pair",
                     True,
                     rx.el.div(
-                        rx.el.label(
+                        rx.el.p(
                             "Search Pair",
-                            htmlFor="pair",
                             class_name="block text-sm font-medium text-gray-700",
                         ),
-                        rx.radix.dropdown_menu.root(
-                            rx.radix.dropdown_menu.trigger(
-                                rx.el.input(
-                                    placeholder="E.g., BTCUSDT",
-                                    on_key_up=BotsState.set_pair_search_term,
-                                    on_focus=lambda: BotsState.set_show_pair_dropdown(
-                                        True
-                                    ),
-                                    class_name="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md",
-                                    default_value=BotsState.current_bot_config["pair"],
-                                    name="pair_search_input",
-                                )
+                        rx.el.div(
+                            rx.el.input(
+                                placeholder="E.g., BTCUSDT",
+                                name="pair_search_input",
+                                class_name="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md",
+                                default_value=BotsState.current_bot_config["pair"],
+                                on_key_down=BotsState.set_pair_search_term.debounce(
+                                    300
+                                ),
+                                on_focus=lambda: BotsState.set_show_pair_dropdown(True),
                             ),
                             rx.cond(
                                 BotsState.show_pair_dropdown,
-                                rx.radix.dropdown_menu.content(
-                                    rx.el.div(
-                                        rx.foreach(
-                                            ExchangeState.filtered_trading_pairs,
-                                            lambda pair: rx.radix.dropdown_menu.item(
-                                                pair,
-                                                on_click=lambda: BotsState.update_bot_config_pair(
+                                rx.el.div(
+                                    rx.foreach(
+                                        ExchangeState.filtered_trading_pairs,
+                                        lambda pair: rx.el.div(
+                                            pair,
+                                            on_mouse_down=[
+                                                lambda: BotsState.update_bot_config_pair(
                                                     pair
                                                 ),
-                                            ),
+                                                lambda: BotsState.set_show_pair_dropdown(
+                                                    False
+                                                ),
+                                            ],
+                                            class_name="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm",
                                         ),
-                                        class_name="max-h-60 overflow-y-auto",
-                                    )
+                                    ),
+                                    class_name="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto",
                                 ),
                                 None,
+                            ),
+                            class_name="relative",
+                            on_mouse_leave=lambda: BotsState.set_show_pair_dropdown(
+                                False
                             ),
                         ),
                     ),
@@ -188,17 +191,17 @@ def create_bot_wizard() -> rx.Component:
                     rx.el.button(
                         "Cancel",
                         on_click=BotsState.close_create_wizard,
-                        class_name="px-4 py-2 bg-gray-200 text-gray-800 rounded-md",
+                        class_name="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300",
                         type="button",
                     ),
                     rx.el.button(
                         "Create Bot",
                         type="submit",
-                        class_name="px-4 py-2 bg-teal-600 text-white rounded-md",
+                        class_name="px-4 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700",
                     ),
                     class_name="flex justify-end gap-4 mt-6",
                 ),
-                on_submit=BotsState.add_bot,
+                on_submit=lambda form_data: BotsState.add_bot(form_data),
                 reset_on_submit=True,
                 class_name="space-y-4",
             ),
