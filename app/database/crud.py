@@ -13,6 +13,21 @@ def get_user_by_verification_token(db: Session, token: str):
     return db.query(models.User).filter(models.User.verification_token == token).first()
 
 
+def create_password_reset_token(db: Session, user: models.User) -> str:
+    token = str(uuid.uuid4())
+    expires = datetime.utcnow() + timedelta(hours=1)
+    user.password_reset_token = token
+    user.password_reset_token_expires = expires
+    db.commit()
+    return token
+
+
+def get_user_by_password_reset_token(db: Session, token: str):
+    return (
+        db.query(models.User).filter(models.User.password_reset_token == token).first()
+    )
+
+
 def create_user(db: Session, username: str, email: str, password: str):
     hashed_password = security.hash_password(password)
     verification_token = str(uuid.uuid4())

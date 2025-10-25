@@ -10,6 +10,8 @@ from app.pages.subscription import subscription_page
 from app.pages.settings import settings_page
 from app.pages.analytics_page import analytics_page
 from app.pages.bot_detail_page import bot_detail_page
+from app.pages.forgot_password import forgot_password_page
+from app.pages.reset_password import reset_password_page
 from app.api import api
 
 
@@ -45,6 +47,8 @@ from app.pages.verify_email_page import verify_email_page
 app.add_page(index, route="/", on_load=AuthState.check_login)
 app.add_page(login_page, route="/login")
 app.add_page(register_page, route="/register")
+app.add_page(forgot_password_page, route="/forgot-password")
+app.add_page(reset_password_page, route="/reset-password/[token]")
 app.add_page(
     verify_email_page, route="/verify-email/[token]", on_load=AuthState.verify_email
 )

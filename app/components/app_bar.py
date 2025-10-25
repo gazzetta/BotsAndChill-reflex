@@ -1,5 +1,4 @@
 import reflex as rx
-import reflex as rx
 from app.states.auth_state import AuthState
 from app.states.sidebar_state import SidebarState
 from app.states.notification_state import NotificationState

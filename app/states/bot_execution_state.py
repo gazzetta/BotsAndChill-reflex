@@ -7,6 +7,8 @@ from app.states.bot_state import BotsState, Bot
 from app.states.exchange_state import ExchangeState
 from app.states.deal_state import DealState, Order, OrderStatus, Deal
 from contextlib import AsyncExitStack
+from app.services.email_service import EmailService
+from app.states.auth_state import AuthState
 
 
 class BotExecutionState(rx.State):
@@ -134,6 +136,14 @@ class BotExecutionState(rx.State):
             logging.info(
                 f"Successfully placed base order and created deal for bot {bot_id}"
             )
+            auth_state = await self.get_state(AuthState)
+            if auth_state.current_user:
+                email_service = await self.get_state(EmailService)
+                email_service.send_bot_notification_email(
+                    to_email=auth_state.current_user["email"],
+                    bot_name=bot["name"],
+                    message=f"A new deal has been started for pair {bot['config']['pair']}. Base order filled at {filled_price}.",
+                )
         return True
 
     async def _check_bot_strategy(self, bot_id: str, current_price: float):
@@ -175,6 +185,14 @@ class BotExecutionState(rx.State):
                 bots_state.update_bot_stats(bot_id, realized_pnl, 1)
                 bots_state.set_bot_status(bot_id, "stopped")
                 logging.info(f"Deal for bot {bot_id} closed with PNL: {realized_pnl}")
+                auth_state = await self.get_state(AuthState)
+                if auth_state.current_user:
+                    email_service = await self.get_state(EmailService)
+                    email_service.send_bot_notification_email(
+                        to_email=auth_state.current_user["email"],
+                        bot_name=bot["name"],
+                        message=f"Take profit target hit! Deal closed with a profit of {realized_pnl:.2f} USDT.",
+                    )
                 yield BotExecutionState.stop_bot_execution(bot_id)
             else:
                 logging.error(
@@ -239,6 +257,14 @@ class BotExecutionState(rx.State):
                 logging.info(
                     f"Successfully placed safety order {num_safety_orders + 1} for bot {bot_id}."
                 )
+                auth_state = await self.get_state(AuthState)
+                if auth_state.current_user:
+                    email_service = await self.get_state(EmailService)
+                    email_service.send_bot_notification_email(
+                        to_email=auth_state.current_user["email"],
+                        bot_name=bot["name"],
+                        message=f"Safety order #{num_safety_orders + 1} filled for {bot['config']['pair']} at price {filled_price}.",
+                    )
             else:
                 logging.error(f"Safety order failed for bot {bot_id}: {so_result}")
                 bots_state.set_bot_status(bot_id, "monitoring")

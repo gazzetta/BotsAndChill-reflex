@@ -57,6 +57,14 @@ def login_form() -> rx.Component:
             ),
             on_submit=AuthState.login,
         ),
+        rx.el.div(
+            rx.el.a(
+                "Forgot password?",
+                href="/forgot-password",
+                class_name="text-sm text-teal-600 hover:text-teal-500",
+            ),
+            class_name="text-sm text-right",
+        ),
         rx.el.p(
             "Don't have an account? ",
             rx.el.a(

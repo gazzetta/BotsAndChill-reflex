@@ -24,6 +24,8 @@ class User(Base):
     email_verified = Column(Boolean, default=False, nullable=False)
     verification_token = Column(String, unique=True, index=True, nullable=True)
     verification_token_expires = Column(DateTime, nullable=True)
+    password_reset_token = Column(String, unique=True, index=True, nullable=True)
+    password_reset_token_expires = Column(DateTime, nullable=True)
     encrypted_api_key = Column(LargeBinary, nullable=True)
     encrypted_secret_key = Column(LargeBinary, nullable=True)
     bots = relationship("Bot", back_populates="owner")

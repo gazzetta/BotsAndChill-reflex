@@ -5,6 +5,7 @@ import logging
 from app.database import crud, security, models
 from app.database.database import get_db
 from sqlalchemy.orm import Session
+from app.services.email_service import EmailService
 
 
 class User(TypedDict):
@@ -37,11 +38,13 @@ class AuthState(rx.State):
             return False
         return True
 
-    def _send_verification_email(self, user: models.User):
-        verification_link = f"{self.router.page.full_raw_url.replace('/register', '')}/verify-email/{user.verification_token}"
-        logging.info(f"VERIFICATION LINK for {user.email}: {verification_link}")
+    async def _send_verification_email_async(self, user: models.User):
+        verification_link = f"{self.router.page.full_raw_url.replace('/register', '').replace('/login', '')}/verify-email/{user.verification_token}"
+        email_service = await self.get_state(EmailService)
+        email_service.send_verification_email(user.email, verification_link)
         return rx.toast.info(
-            f"Verification link (for demo): {verification_link}", duration=10000
+            "A verification email has been sent. Please check your inbox.",
+            duration=5000,
         )
 
     @rx.event
@@ -68,7 +71,7 @@ class AuthState(rx.State):
         db.close()
 
     @rx.event
-    def login(self, form_data: dict):
+    async def login(self, form_data: dict):
         email = form_data["email"]
         password = form_data["password"]
         db = self._get_db()
@@ -77,7 +80,7 @@ class AuthState(rx.State):
             if not user.email_verified:
                 self.login_error = "Please verify your email address. Check your inbox."
                 db.close()
-                return self._send_verification_email(user)
+                return await self._send_verification_email_async(user)
             self.is_logged_in = True
             self.current_user = User(
                 username=user.username,
@@ -95,7 +98,7 @@ class AuthState(rx.State):
             db.close()
 
     @rx.event
-    def register(self, form_data: dict):
+    async def register(self, form_data: dict):
         email = form_data["email"]
         password = form_data["password"]
         username = form_data["username"]
@@ -108,7 +111,7 @@ class AuthState(rx.State):
             return
         new_user = crud.create_user(db, username, email, password)
         db.close()
-        return self._send_verification_email(new_user)
+        return await self._send_verification_email_async(new_user)
 
     @rx.event
     def logout(self):

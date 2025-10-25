@@ -113,6 +113,15 @@ class BotsState(rx.State):
         )
         self.bots.append(new_bot)
         self.show_create_wizard = False
+        from app.services.email_service import EmailService
+
+        if user:
+            email_service = await self.get_state(EmailService)
+            email_service.send_bot_notification_email(
+                to_email=user["email"],
+                bot_name=new_bot["name"],
+                message=f"Your new DCA bot for {new_bot['config']['pair']} has been created successfully!",
+            )
 
     @rx.event
     def remove_bot(self, bot_id: str):
