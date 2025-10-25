@@ -26,6 +26,7 @@ BotStatus = Literal[
     "placing_order",
     "in_position",
     "closing",
+    "waiting_for_balance",
     "error",
 ]
 

@@ -16,6 +16,27 @@ class BotExecutionState(rx.State):
     bot_prices: dict[str, float] = {}
 
     @rx.event(background=True)
+    async def poll_balances_for_pending_orders(self):
+        while True:
+            bots_to_check = []
+            async with self:
+                bots_state = await self.get_state(BotsState)
+                bots_to_check = [
+                    bot
+                    for bot in bots_state.bots
+                    if bot["status"] == "waiting_for_balance"
+                ]
+            if bots_to_check:
+                logging.info(
+                    f"Polling balances for {len(bots_to_check)} bots waiting for funds."
+                )
+                for bot in bots_to_check:
+                    await self._check_safety_orders(
+                        bot["id"], self.bot_prices.get(bot["id"], 0.0), is_retry=True
+                    )
+            await asyncio.sleep(60)
+
+    @rx.event(background=True)
     async def start_bot_execution(self, bot_id: str):
         async with self:
             bots_state = await self.get_state(BotsState)
@@ -48,6 +69,8 @@ class BotExecutionState(rx.State):
             async with self:
                 bots_state = await self.get_state(BotsState)
                 bots_state.set_bot_status(bot_id, "monitoring")
+            if not self.active_sockets:
+                yield BotExecutionState.poll_balances_for_pending_orders
         logging.info(
             f"Starting trade socket for bot {bot_id} on pair {bot['config']['pair']}"
         )
@@ -148,8 +171,14 @@ class BotExecutionState(rx.State):
 
     async def _check_bot_strategy(self, bot_id: str, current_price: float):
         async with self:
+            bots_state = await self.get_state(BotsState)
+            bot = next((b for b in bots_state.bots if b["id"] == bot_id), None)
+            if not bot or bot["status"] in ["paused", "stopped", "error", "closing"]:
+                return
             deal_state = await self.get_state(DealState)
             deal = deal_state.get_active_deal(bot_id)
+            if bot["status"] == "waiting_for_balance":
+                return
             if not deal or deal["status"] != "active":
                 return
             deal_state.update_unrealized_pnl(bot_id, current_price)
@@ -200,44 +229,70 @@ class BotExecutionState(rx.State):
                 )
                 bots_state.set_bot_status(bot_id, "error")
 
-    async def _check_safety_orders(self, bot_id: str, deal: Deal, current_price: float):
+    async def _check_safety_orders(
+        self, bot_id: str, deal_or_price: Deal | float, is_retry: bool = False
+    ):
         bots_state = await self.get_state(BotsState)
         bot = next((b for b in bots_state.bots if b["id"] == bot_id), None)
-        if not bot:
+        deal_state = await self.get_state(DealState)
+        deal = (
+            deal_state.get_active_deal(bot_id)
+            if not is_retry
+            else deal_state.deals.get(bot_id)
+        )
+        if not bot or not deal:
             return
+        current_price = cast(float, deal_or_price)
         config = bot["config"]
         num_safety_orders = len(deal["safety_orders"])
         if num_safety_orders >= config["max_safety_orders"]:
             return
-        last_price = deal["base_order"]["price"]
-        price_deviation_needed = (
-            config["price_deviation"]
-            * config["safety_order_step_scale"] ** num_safety_orders
-        )
-        trigger_price = deal["base_order"]["price"] * (1 - price_deviation_needed / 100)
-        cumulative_deviation = config["price_deviation"]
-        for i in range(num_safety_orders):
-            cumulative_deviation += config["price_deviation"] * config[
-                "safety_order_step_scale"
-            ] ** (i + 1)
-        trigger_price = deal["base_order"]["price"] * (1 - cumulative_deviation / 100)
-        if current_price <= trigger_price:
-            logging.info(
-                f"Safety order condition met for bot {bot_id} at price {current_price}."
+        price_should_trigger = False
+        if not is_retry:
+            cumulative_deviation = config["price_deviation"]
+            for i in range(num_safety_orders):
+                cumulative_deviation += config["price_deviation"] * config[
+                    "safety_order_step_scale"
+                ] ** (i + 1)
+            trigger_price = deal["base_order"]["price"] * (
+                1 - cumulative_deviation / 100
             )
-            bots_state.set_bot_status(bot_id, "placing_order")
+            price_should_trigger = current_price <= trigger_price
+        if price_should_trigger or is_retry:
+            if not is_retry:
+                logging.info(
+                    f"Safety order condition met for bot {bot_id} at price {current_price}."
+                )
+                bots_state.set_bot_status(bot_id, "placing_order")
             exchange_state = await self.get_state(ExchangeState)
             safety_order_usdt = (
                 config["safety_order_size"]
                 * config["safety_order_volume_scale"] ** num_safety_orders
             )
-            balance_ok = await exchange_state.validate_balance(
+            balance_ok, _ = await exchange_state.validate_balance(
                 "USDT", safety_order_usdt
             )
             if not balance_ok:
-                logging.error(f"Insufficient balance for safety order on bot {bot_id}")
-                bots_state.set_bot_status(bot_id, "monitoring")
+                if bot["status"] != "waiting_for_balance":
+                    logging.warning(
+                        f"Insufficient balance for safety order on bot {bot_id}. Entering waiting state."
+                    )
+                    bots_state.set_bot_status(bot_id, "waiting_for_balance")
+                    auth_state = await self.get_state(AuthState)
+                    if auth_state.current_user:
+                        email_service = await self.get_state(EmailService)
+                        email_service.send_bot_notification_email(
+                            to_email=auth_state.current_user["email"],
+                            bot_name=bot["name"],
+                            message=f"Your bot is paused due to insufficient USDT balance to place a safety order. It will resume automatically when funds are available.",
+                        )
+                else:
+                    logging.info(f"Still waiting for balance for bot {bot_id}...")
                 return
+            if bot["status"] == "waiting_for_balance":
+                logging.info(
+                    f"Balance detected for bot {bot_id}. Retrying safety order."
+                )
             so_result = await exchange_state.place_market_order(
                 pair=config["pair"], side="BUY", quantity=safety_order_usdt
             )
@@ -253,7 +308,6 @@ class BotExecutionState(rx.State):
                     order_type="safety",
                     status="filled",
                 )
-                deal_state = await self.get_state(DealState)
                 deal_state.add_safety_order(bot_id, safety_order)
                 bots_state.set_bot_status(bot_id, "in_position")
                 logging.info(
@@ -262,11 +316,15 @@ class BotExecutionState(rx.State):
                 auth_state = await self.get_state(AuthState)
                 if auth_state.current_user:
                     email_service = await self.get_state(EmailService)
+                    if is_retry:
+                        message = f"Safety order placed successfully after funds became available."
+                    else:
+                        message = f"Safety order #{num_safety_orders + 1} filled for {bot['config']['pair']} at price {filled_price}."
                     email_service.send_bot_notification_email(
                         to_email=auth_state.current_user["email"],
                         bot_name=bot["name"],
-                        message=f"Safety order #{num_safety_orders + 1} filled for {bot['config']['pair']} at price {filled_price}.",
+                        message=message,
                     )
             else:
                 logging.error(f"Safety order failed for bot {bot_id}: {so_result}")
-                bots_state.set_bot_status(bot_id, "monitoring")
+                bots_state.set_bot_status(bot_id, "error")

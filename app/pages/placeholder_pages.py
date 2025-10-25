@@ -24,6 +24,10 @@ def status_badge(status: rx.Var[str]) -> rx.Component:
                 "px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded-full",
             ),
             (
+                "waiting_for_balance",
+                "px-2 py-1 text-xs font-medium text-yellow-800 bg-yellow-300 rounded-full animate-pulse",
+            ),
+            (
                 "starting",
                 "px-2 py-1 text-xs font-medium text-white bg-blue-400 rounded-full animate-pulse",
             ),
