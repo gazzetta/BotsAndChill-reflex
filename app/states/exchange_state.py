@@ -52,14 +52,21 @@ class ExchangeState(rx.State):
                 self.connection_message = "API Key and Secret Key cannot be empty."
                 self.is_connected = False
             return
+        is_testnet_mode = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
+        logging.info(f"Attempting to connect to Binance. Testnet: {is_testnet_mode}")
         try:
-            client = Client(api_key, secret_key, testnet=self.is_testnet)
+            client = Client(api_key, secret_key, testnet=is_testnet_mode)
+            if is_testnet_mode:
+                client.API_URL = client.API_TESTNET_URL
             client.get_account()
         except BinanceAPIException as e:
             logging.exception(f"Binance API Error during key validation: {e}")
             async with self:
                 self.is_connected = False
-                self.connection_message = f"Connection failed: {e.message}"
+                if e.code == -2015:
+                    self.connection_message = f"Connection failed (Testnet: {is_testnet_mode}): Invalid API Key. Please ensure your keys are for the correct environment (live vs testnet), have spot trading permissions, and IP restrictions are correctly configured."
+                else:
+                    self.connection_message = f"Connection failed ({('Testnet' if is_testnet_mode else 'Live')}): {e.message}"
                 self.api_keys = {"api_key": "", "secret_key": ""}
             return
         except Exception as e:
@@ -118,12 +125,14 @@ class ExchangeState(rx.State):
                 self.is_connected = False
                 self.connection_message = "API keys not set."
             return
+        is_testnet_mode = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
+        logging.info(f"Testing connection to Binance. Testnet: {is_testnet_mode}")
         try:
-            client = Client(api_key, secret_key, testnet=self.is_testnet)
+            client = Client(api_key, secret_key, testnet=is_testnet_mode)
             account_info = client.get_account()
             async with self:
                 self.is_connected = True
-                self.connection_message = "Successfully connected to Binance."
+                self.connection_message = f"Successfully connected to Binance ({('Testnet' if is_testnet_mode else 'Live')})."
                 balances = [
                     WalletBalance(**bal)
                     for bal in account_info.get("balances", [])
@@ -133,15 +142,21 @@ class ExchangeState(rx.State):
             yield ExchangeState.fetch_trading_pairs
         except BinanceAPIException as e:
             logging.exception(f"Binance API Error: {e}")
+            is_testnet_mode = (
+                os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
+            )
             async with self:
                 self.is_connected = False
-                self.connection_message = f"Connection failed: {e.message}"
+                self.connection_message = f"Connection failed ({('Testnet' if is_testnet_mode else 'Live')}): {e.message}"
                 self.api_keys = {"api_key": "", "secret_key": ""}
         except Exception as e:
             logging.exception(f"Unexpected connection error: {e}")
+            is_testnet_mode = (
+                os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
+            )
             async with self:
                 self.is_connected = False
-                self.connection_message = f"An unexpected error occurred: {e}"
+                self.connection_message = f"An unexpected error occurred ({('Testnet' if is_testnet_mode else 'Live')}): {e}"
                 self.api_keys = {"api_key": "", "secret_key": ""}
 
     @rx.event(background=True)
@@ -217,9 +232,15 @@ class ExchangeState(rx.State):
             logging.error("Cannot create async client, not connected or keys not set.")
             return None
         try:
-            return await AsyncClient.create(
-                api_key, secret_key, testnet=self.is_testnet
+            is_testnet_mode = (
+                os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
             )
+            client = await AsyncClient.create(
+                api_key, secret_key, testnet=is_testnet_mode
+            )
+            if is_testnet_mode and hasattr(client, "API_TESTNET_URL"):
+                client.API_URL = client.API_TESTNET_URL
+            return client
         except Exception as e:
             logging.exception(f"Failed to create async client: {e}")
             return None
