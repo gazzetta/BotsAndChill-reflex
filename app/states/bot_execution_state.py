@@ -14,6 +14,7 @@ from app.states.auth_state import AuthState
 class BotExecutionState(rx.State):
     active_sockets: dict[str, AsyncExitStack] = {}
     bot_prices: dict[str, float] = {}
+    order_monitoring_task: asyncio.Task | None = None
 
     @rx.event(background=True)
     async def poll_balances_for_pending_orders(self):
@@ -69,6 +70,10 @@ class BotExecutionState(rx.State):
             async with self:
                 bots_state = await self.get_state(BotsState)
                 bots_state.set_bot_status(bot_id, "monitoring")
+            if not self.order_monitoring_task or self.order_monitoring_task.done():
+                task = asyncio.create_task(self._monitor_open_orders())
+                async with self:
+                    self.order_monitoring_task = task
             if not self.active_sockets:
                 yield BotExecutionState.poll_balances_for_pending_orders
         logging.info(
@@ -199,7 +204,7 @@ class BotExecutionState(rx.State):
                     order_type="safety",
                     status="new",
                 )
-                deal_state.add_safety_order(bot_id, safety_order)
+                deal_state.add_pending_safety_order(bot_id, safety_order)
                 logging.info(
                     f"Successfully placed immediate safety order #{i + 1} for bot {bot_id} at price {limit_price}"
                 )
@@ -247,8 +252,8 @@ class BotExecutionState(rx.State):
                 ) * deal["total_quantity"]
                 deal_state = await self.get_state(DealState)
                 deal_state.close_deal(bot_id, realized_pnl)
+                bots_state = await self.get_state(BotsState)
                 bots_state.update_bot_stats(bot_id, realized_pnl, 1)
-                bots_state.set_bot_status(bot_id, "stopped")
                 logging.info(f"Deal for bot {bot_id} closed with PNL: {realized_pnl}")
                 auth_state = await self.get_state(AuthState)
                 if auth_state.current_user:
@@ -256,9 +261,19 @@ class BotExecutionState(rx.State):
                     email_service.send_bot_notification_email(
                         to_email=auth_state.current_user["email"],
                         bot_name=bot["name"],
-                        message=f"Take profit target hit! Deal closed with a profit of {realized_pnl:.2f} USDT.",
+                        message=f"Take profit target hit! Deal closed with a profit of {realized_pnl:.2f} USDT. Starting new cycle.",
                     )
-                yield BotExecutionState.stop_bot_execution(bot_id)
+                bots_state.set_bot_status(bot_id, "starting")
+                base_order_placed = await self._place_base_order(bot_id)
+                if not base_order_placed:
+                    logging.error(f"Failed to restart bot {bot_id} after take profit.")
+                    bots_state.set_bot_status(bot_id, "error")
+                    yield BotExecutionState.stop_bot_execution(bot_id)
+                else:
+                    logging.info(
+                        f"Bot {bot_id} successfully restarted for a new cycle."
+                    )
+                    bots_state.set_bot_status(bot_id, "monitoring")
             else:
                 logging.error(
                     f"Take profit sell order failed for bot {bot_id}: {sell_order}"
@@ -344,7 +359,7 @@ class BotExecutionState(rx.State):
                     order_type="safety",
                     status="filled",
                 )
-                deal_state.add_safety_order(bot_id, safety_order)
+                deal_state.add_pending_safety_order(bot_id, safety_order)
                 bots_state.set_bot_status(bot_id, "in_position")
                 logging.info(
                     f"Successfully placed safety order {num_safety_orders + 1} for bot {bot_id}."
@@ -352,10 +367,7 @@ class BotExecutionState(rx.State):
                 auth_state = await self.get_state(AuthState)
                 if auth_state.current_user:
                     email_service = await self.get_state(EmailService)
-                    if is_retry:
-                        message = f"Safety order placed successfully after funds became available."
-                    else:
-                        message = f"Safety order #{num_safety_orders + 1} filled for {bot['config']['pair']} at price {filled_price}."
+                    message = f"Safety order #{num_safety_orders + 1} placed for {bot['config']['pair']} at price {filled_price}."
                     email_service.send_bot_notification_email(
                         to_email=auth_state.current_user["email"],
                         bot_name=bot["name"],
@@ -364,3 +376,126 @@ class BotExecutionState(rx.State):
             else:
                 logging.error(f"Safety order failed for bot {bot_id}: {so_result}")
                 bots_state.set_bot_status(bot_id, "error")
+
+    async def _monitor_open_orders(self):
+        while True:
+            await asyncio.sleep(5)
+            async with self:
+                bots_state = await self.get_state(BotsState)
+                deal_state = await self.get_state(DealState)
+                exchange_state = await self.get_state(ExchangeState)
+                active_bots = [
+                    b
+                    for b in bots_state.bots
+                    if b["status"] in ["monitoring", "in_position"]
+                ]
+                if not active_bots or not exchange_state.is_connected:
+                    continue
+                client = await exchange_state._get_async_client()
+                if not client:
+                    continue
+            try:
+                for bot in active_bots:
+                    deal = deal_state.deals.get(bot["id"])
+                    if (
+                        not deal
+                        or deal["status"] != "active"
+                        or (not deal["pending_safety_orders"])
+                    ):
+                        continue
+                    for so in list(deal["pending_safety_orders"]):
+                        try:
+                            order_status = await client.get_order(
+                                symbol=bot["config"]["pair"], orderId=so["order_id"]
+                            )
+                            if order_status["status"] == "FILLED":
+                                logging.info(
+                                    f"Safety order {so['order_id']} for bot {bot['id']} has been filled."
+                                )
+                                async with self:
+                                    deal_state = await self.get_state(DealState)
+                                    deal_state.safety_order_filled(
+                                        bot_id=bot["id"],
+                                        filled_order_id=so["order_id"],
+                                        fill_price=float(order_status["price"]),
+                                        fill_qty=float(order_status["executedQty"]),
+                                    )
+                                    await self._place_next_safety_order(bot["id"])
+                        except BinanceAPIException as e:
+                            if e.code == -2013:
+                                logging.warning(
+                                    f"Order {so['order_id']} not found on exchange, likely canceled or expired. Removing from pending."
+                                )
+                                async with self:
+                                    deal_state = await self.get_state(DealState)
+                                    deal_state.deals[bot["id"]][
+                                        "pending_safety_orders"
+                                    ] = [
+                                        pso
+                                        for pso in deal_state.deals[bot["id"]][
+                                            "pending_safety_orders"
+                                        ]
+                                        if pso["order_id"] != so["order_id"]
+                                    ]
+                            else:
+                                logging.exception(
+                                    f"Error checking order status for {so['order_id']}: {e}"
+                                )
+                        except Exception as e:
+                            logging.exception(
+                                f"Unexpected error checking order status for {so['order_id']}: {e}"
+                            )
+            finally:
+                if client:
+                    await client.close_connection()
+
+    async def _place_next_safety_order(self, bot_id: str):
+        async with self:
+            bots_state = await self.get_state(BotsState)
+            bot = next((b for b in bots_state.bots if b["id"] == bot_id), None)
+            deal_state = await self.get_state(DealState)
+            deal = deal_state.deals.get(bot_id)
+            if not bot or not deal or deal["status"] != "active":
+                return
+            config = bot["config"]
+            total_sos_placed = len(deal["filled_safety_orders"]) + len(
+                deal["pending_safety_orders"]
+            )
+            if total_sos_placed >= config["max_safety_orders"]:
+                logging.info(f"Max safety orders reached for bot {bot_id}")
+                return
+            last_price = deal["average_entry_price"]
+            next_so_num = total_sos_placed
+            deviation = (
+                config["price_deviation"]
+                * config["safety_order_step_scale"] ** next_so_num
+            )
+            limit_price = last_price * (1 - deviation / 100)
+            so_quantity_usdt = (
+                config["safety_order_size"]
+                * config["safety_order_volume_scale"] ** next_so_num
+            )
+            so_quantity_asset = so_quantity_usdt / limit_price
+            exchange_state = await self.get_state(ExchangeState)
+            so_result = await exchange_state.place_limit_order(
+                pair=config["pair"],
+                side="BUY",
+                quantity=so_quantity_asset,
+                price=limit_price,
+            )
+            if so_result:
+                safety_order = Order(
+                    order_id=str(so_result["orderId"]),
+                    timestamp=so_result["transactTime"] / 1000,
+                    side="buy",
+                    price=float(so_result["price"]),
+                    quantity=float(so_result["origQty"]),
+                    order_type="safety",
+                    status="new",
+                )
+                deal_state.add_pending_safety_order(bot_id, safety_order)
+                logging.info(
+                    f"Placed rolling safety order #{next_so_num + 1} for bot {bot_id}."
+                )
+            else:
+                logging.error(f"Failed to place rolling safety order for bot {bot_id}.")

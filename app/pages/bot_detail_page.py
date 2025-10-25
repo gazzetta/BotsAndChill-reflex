@@ -147,8 +147,14 @@ def bot_detail_page() -> rx.Component:
                                     DealState.active_deal["unrealized_pnl"].to_string(),
                                 ),
                                 config_display_item(
-                                    "Safety Orders Placed",
-                                    DealState.active_deal["safety_orders"]
+                                    "Safety Orders Filled",
+                                    DealState.active_deal["filled_safety_orders"]
+                                    .length()
+                                    .to_string(),
+                                ),
+                                config_display_item(
+                                    "Safety Orders Pending",
+                                    DealState.active_deal["pending_safety_orders"]
                                     .length()
                                     .to_string(),
                                 ),

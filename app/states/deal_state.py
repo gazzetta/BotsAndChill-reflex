@@ -24,7 +24,8 @@ class Deal(TypedDict):
     entry_time: float
     close_time: float | None
     base_order: Order
-    safety_orders: list[Order]
+    filled_safety_orders: list[Order]
+    pending_safety_orders: list[Order]
     take_profit_order: Order | None
     average_entry_price: float
     total_quantity: float
@@ -55,7 +56,7 @@ class DealState(rx.State):
         return self.deals.get(bot_id)
 
     def _calculate_average_entry(self, deal: Deal) -> tuple[float, float]:
-        all_orders = [deal["base_order"]] + deal["safety_orders"]
+        all_orders = [deal["base_order"]] + deal["filled_safety_orders"]
         total_cost = sum((o["price"] * o["quantity"] for o in all_orders))
         total_quantity = sum((o["quantity"] for o in all_orders))
         if total_quantity == 0:
@@ -72,7 +73,8 @@ class DealState(rx.State):
             entry_time=base_order["timestamp"],
             close_time=None,
             base_order=base_order,
-            safety_orders=[],
+            filled_safety_orders=[],
+            pending_safety_orders=[],
             take_profit_order=None,
             average_entry_price=base_order["price"],
             total_quantity=base_order["quantity"],
@@ -82,15 +84,32 @@ class DealState(rx.State):
         self.deals[bot_id] = new_deal
 
     @rx.event
-    def add_safety_order(self, bot_id: str, safety_order: Order):
-        if bot_id not in self.deals:
+    def add_pending_safety_order(self, bot_id: str, safety_order: Order):
+        if bot_id not in self.deals or self.deals[bot_id]["status"] != "active":
+            return
+        self.deals[bot_id]["pending_safety_orders"].append(safety_order)
+
+    @rx.event
+    def safety_order_filled(
+        self, bot_id: str, filled_order_id: str, fill_price: float, fill_qty: float
+    ):
+        if bot_id not in self.deals or self.deals[bot_id]["status"] != "active":
             return
         deal = self.deals[bot_id]
-        deal["safety_orders"].append(safety_order)
-        avg_price, total_quantity = self._calculate_average_entry(deal)
-        deal["average_entry_price"] = avg_price
-        deal["total_quantity"] = total_quantity
-        self.deals[bot_id] = deal
+        order_to_move = None
+        for i, order in enumerate(deal["pending_safety_orders"]):
+            if order["order_id"] == filled_order_id:
+                order_to_move = deal["pending_safety_orders"].pop(i)
+                break
+        if order_to_move:
+            order_to_move["status"] = "filled"
+            order_to_move["price"] = fill_price
+            order_to_move["quantity"] = fill_qty
+            deal["filled_safety_orders"].append(order_to_move)
+            avg_price, total_quantity = self._calculate_average_entry(deal)
+            deal["average_entry_price"] = avg_price
+            deal["total_quantity"] = total_quantity
+            self.deals[bot_id] = deal
 
     @rx.event
     def update_unrealized_pnl(self, bot_id: str, current_price: float):
