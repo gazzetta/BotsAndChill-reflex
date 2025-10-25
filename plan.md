@@ -2,6 +2,7 @@
 
 ## Current Goal
 ✅ Phase 10: Complete Database Integration implemented successfully!
+✅ **Critical Fix Applied**: Binance API keys now stored per user in database with immediate validation
 
 ---
 
@@ -26,6 +27,8 @@
 - [x] Build available trading pairs selector (fetch from Binance spot markets)
 - [x] Display user's Binance spot wallet balances in dashboard
 - [x] Add API key validation and error handling with user-friendly messages
+- [x] **Store API keys per user in database** (encrypted with Fernet)
+- [x] **Add immediate credential validation** before saving keys
 
 ---
 
@@ -216,11 +219,18 @@
 - [x] Allow bot restart after error state cleared
 - [x] Show error reason in UI with recovery options
 
+### 10.8: API Key Database Storage & Validation ✅
+- [x] Remove LocalStorage dependency for API keys
+- [x] Store API keys per user in database (encrypted with Fernet)
+- [x] Add immediate validation before saving (test with client.get_account())
+- [x] Load API keys from database on app startup
+- [x] Show clear error messages if validation fails
+
 ---
 
 ## Summary: Complete Implementation ✅
 
-**All 10 Phases Completed** (103/103 tasks)
+**All 10 Phases Completed** (107/107 tasks)
 
 ### Key Features Delivered:
 ✅ **User Authentication**: Register, login, session management with FREE/PRO tiers  
@@ -234,6 +244,7 @@
 ✅ **Database Persistence**: SQLite with encrypted API keys + full CRUD operations  
 ✅ **Testnet Support**: Safe testing environment without real funds  
 ✅ **Production Ready**: Auto-restart, balance retry, error recovery, order cleanup  
+✅ **API Key Security**: Per-user encrypted storage with immediate validation  
 
 ### Critical Gaps Fixed:
 ✅ **Gap #1 - Database Persistence**: All bots, deals, orders, and stats now persist to SQLite  
@@ -242,6 +253,15 @@
 ✅ **Gap #4 - Balance Handling**: Automatic retry when funds become available  
 ✅ **Gap #5 - Error Recovery**: UI button to reset and retry failed bots  
 ✅ **Gap #6 - Statistics Persistence**: P/L and deal counts saved to database  
+✅ **Gap #7 - API Key Storage**: Keys stored per user in database, not browser LocalStorage  
+✅ **Gap #8 - Credential Validation**: Immediate validation before saving API keys  
+
+### Test User Credentials:
+```
+Email: test@example.com
+Password: Test1234
+Status: Email verified (ready to use)
+```
 
 ### Environment Setup Required:
 ```bash
@@ -256,20 +276,22 @@ RESEND_API_KEY=<your-resend-key>  # for email notifications
 
 ### Database Features:
 - **Persistent Storage**: All data survives app restarts
-- **Encrypted API Keys**: Binance keys stored with Fernet encryption
+- **Encrypted API Keys**: Binance keys stored per user with Fernet encryption
 - **Relational Integrity**: Proper foreign keys (User → Bot → Deal → Order)
 - **Transaction Safety**: All CRUD operations use database transactions
 - **Auto-Recovery**: Running bots automatically resume on startup
 - **Order Cleanup**: Pending orders canceled when bots stopped
+- **Credential Validation**: API keys validated before storage
 
 ### Production Workflow:
 1. **App Starts** → Load running bots from database → Resume WebSockets
-2. **Bot Created** → Validate balance → Save to database → Place base order
-3. **Deal Active** → Monitor price → Place safety orders → Update database
-4. **Balance Low** → Enter waiting state → Poll every 60s → Resume when funded
-5. **Take Profit Hit** → Close deal → Save stats → Auto-restart new cycle
-6. **Bot Stopped** → Cancel pending orders → Update database → Clean up
-7. **App Restarts** → Resume all running bots automatically
+2. **User Adds API Keys** → Validate with Binance → Save encrypted to database
+3. **Bot Created** → Validate balance → Save to database → Place base order
+4. **Deal Active** → Monitor price → Place safety orders → Update database
+5. **Balance Low** → Enter waiting state → Poll every 60s → Resume when funded
+6. **Take Profit Hit** → Close deal → Save stats → Auto-restart new cycle
+7. **Bot Stopped** → Cancel pending orders → Update database → Clean up
+8. **App Restarts** → Load user's API keys → Resume all running bots automatically
 
 ---
 
@@ -283,5 +305,6 @@ RESEND_API_KEY=<your-resend-key>  # for email notifications
 - Error recovery UI allows users to reset and restart failed bots
 - Passwords secured with bcrypt (industry-standard hashing)
 - Email verification prevents spam accounts and validates user identity
-- API keys encrypted with Fernet symmetric encryption
+- API keys encrypted with Fernet symmetric encryption and stored per user
+- API credentials validated immediately before storage to catch invalid keys
 - For production: configure SMTP via Resend for real email sending

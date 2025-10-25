@@ -19,7 +19,7 @@ def api_key_form() -> rx.Component:
                 rx.el.input(
                     id="api_key",
                     name="api_key",
-                    default_value=ExchangeState.api_keys.get("api_key", ""),
+                    default_value=ExchangeState.api_keys["api_key"],
                     class_name="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500",
                 ),
                 class_name="mb-4",
@@ -35,7 +35,7 @@ def api_key_form() -> rx.Component:
                         id="secret_key",
                         name="secret_key",
                         type=rx.cond(ExchangeState.show_secret_key, "text", "password"),
-                        default_value=ExchangeState.api_keys.get("secret_key", ""),
+                        default_value=ExchangeState.api_keys["secret_key"],
                         class_name="block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500",
                     ),
                     rx.el.button(
