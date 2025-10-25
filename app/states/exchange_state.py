@@ -7,6 +7,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from binance import AsyncClient
 import asyncio
+import re
 
 
 class APIKeys(TypedDict):
@@ -42,6 +43,18 @@ class ExchangeState(rx.State):
     @rx.event
     def toggle_show_secret_key(self):
         self.show_secret_key = not self.show_secret_key
+
+    @rx.var
+    async def filtered_trading_pairs(self) -> list[str]:
+        from app.states.bot_state import BotsState
+
+        bots_state = await self.get_state(BotsState)
+        search_term = bots_state.pair_search_term.upper()
+        stablecoin_pattern = re.compile(".*USDT$|.*USDC$|.*FDUSD$|.*TUSD$")
+        stable_pairs = [p for p in self.trading_pairs if stablecoin_pattern.match(p)]
+        if not search_term:
+            return stable_pairs[:100]
+        return [p for p in stable_pairs if search_term in p.upper()][:100]
 
     @rx.event(background=True)
     async def save_api_keys(self, form_data: dict):

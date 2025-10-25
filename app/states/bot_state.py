@@ -46,6 +46,13 @@ class BotsState(rx.State):
     selected_bot: Bot | None = None
     show_create_wizard: bool = False
     show_upgrade_dialog: bool = False
+    pair_search_term: str = ""
+    show_pair_dropdown: bool = False
+
+    @rx.event
+    def set_pair_search_term(self, term: str):
+        self.pair_search_term = term
+
     current_bot_config: BotConfig = {
         "pair": "BTCUSDT",
         "base_order_size": 10.0,

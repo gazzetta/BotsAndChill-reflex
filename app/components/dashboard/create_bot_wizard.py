@@ -62,20 +62,41 @@ def create_bot_wizard() -> rx.Component:
                     True,
                     rx.el.div(
                         rx.el.label(
-                            "Select Pair",
+                            "Search Pair",
                             htmlFor="pair",
                             class_name="block text-sm font-medium text-gray-700",
                         ),
-                        rx.el.select(
-                            rx.foreach(
-                                ExchangeState.trading_pairs,
-                                lambda pair: rx.el.option(pair, value=pair),
+                        rx.radix.dropdown_menu.root(
+                            rx.radix.dropdown_menu.trigger(
+                                rx.el.input(
+                                    placeholder="E.g., BTCUSDT",
+                                    on_key_up=BotsState.set_pair_search_term,
+                                    on_focus=lambda: BotsState.set_show_pair_dropdown(
+                                        True
+                                    ),
+                                    class_name="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md",
+                                    default_value=BotsState.current_bot_config["pair"],
+                                    name="pair_search_input",
+                                )
                             ),
-                            name="pair",
-                            id="pair",
-                            default_value=BotsState.current_bot_config["pair"],
-                            on_change=BotsState.update_bot_config_pair,
-                            class_name="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md",
+                            rx.cond(
+                                BotsState.show_pair_dropdown,
+                                rx.radix.dropdown_menu.content(
+                                    rx.el.div(
+                                        rx.foreach(
+                                            ExchangeState.filtered_trading_pairs,
+                                            lambda pair: rx.radix.dropdown_menu.item(
+                                                pair,
+                                                on_click=lambda: BotsState.update_bot_config_pair(
+                                                    pair
+                                                ),
+                                            ),
+                                        ),
+                                        class_name="max-h-60 overflow-y-auto",
+                                    )
+                                ),
+                                None,
+                            ),
                         ),
                     ),
                 ),
