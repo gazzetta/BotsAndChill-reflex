@@ -22,11 +22,11 @@ class WalletBalance(TypedDict):
 
 class ExchangeState(rx.State):
     api_keys: APIKeys = {"api_key": "", "secret_key": ""}
-    is_connected: bool = False
-    connection_message: str = ""
+    has_api_keys: bool = False
     account_balance: list[WalletBalance] = []
     trading_pairs: list[str] = []
     show_secret_key: bool = False
+    last_balance_refresh: str = ""
 
     @rx.var
     def is_testnet(self) -> bool:
@@ -48,12 +48,12 @@ class ExchangeState(rx.State):
         api_key = form_data.get("api_key", "").strip()
         secret_key = form_data.get("secret_key", "").strip()
         if not api_key or not secret_key:
-            async with self:
-                self.connection_message = "API Key and Secret Key cannot be empty."
-                self.is_connected = False
+            yield rx.toast.error("API Key and Secret Key cannot be empty.")
             return
-        is_testnet_mode = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
-        logging.info(f"Attempting to connect to Binance. Testnet: {is_testnet_mode}")
+        is_testnet_mode = self.is_testnet
+        logging.info(
+            f"Attempting to validate keys with Binance. Testnet: {is_testnet_mode}"
+        )
         try:
             client = Client(api_key, secret_key, testnet=is_testnet_mode)
             if is_testnet_mode:
@@ -62,19 +62,19 @@ class ExchangeState(rx.State):
         except BinanceAPIException as e:
             logging.exception(f"Binance API Error during key validation: {e}")
             async with self:
-                self.is_connected = False
-                if e.code == -2015:
-                    self.connection_message = f"Connection failed (Testnet: {is_testnet_mode}): Invalid API Key. Please ensure your keys are for the correct environment (live vs testnet), have spot trading permissions, and IP restrictions are correctly configured."
-                else:
-                    self.connection_message = f"Connection failed ({('Testnet' if is_testnet_mode else 'Live')}): {e.message}"
+                self.has_api_keys = False
                 self.api_keys = {"api_key": "", "secret_key": ""}
+            yield rx.toast.error(
+                f"Key Validation Failed: {e.message}. Check permissions and environment (Live vs Testnet).",
+                duration=7000,
+            )
             return
         except Exception as e:
             logging.exception(f"Unexpected error during key validation: {e}")
             async with self:
-                self.is_connected = False
-                self.connection_message = f"An unexpected error occurred: {e}"
+                self.has_api_keys = False
                 self.api_keys = {"api_key": "", "secret_key": ""}
+            yield rx.toast.error(f"An unexpected error occurred: {e}")
             return
         async with self:
             from app.database import crud
@@ -82,7 +82,7 @@ class ExchangeState(rx.State):
 
             auth_state = await self.get_state(AuthState)
             if not auth_state.current_user:
-                self.connection_message = "User not logged in."
+                yield rx.toast.error("User not logged in.")
                 return
             db = self.get_db()
             try:
@@ -92,22 +92,14 @@ class ExchangeState(rx.State):
                         db, user.id, api_key=api_key, secret_key=secret_key
                     )
                     self.api_keys = {"api_key": api_key, "secret_key": secret_key}
-                    self.is_connected = True
-                    self.connection_message = (
-                        "Successfully connected and saved API keys."
-                    )
-                    account_info = client.get_account()
-                    balances = [
-                        WalletBalance(**bal)
-                        for bal in account_info.get("balances", [])
-                        if float(bal.get("free", 0)) > 0
-                        or float(bal.get("locked", 0)) > 0
-                    ]
-                    self.account_balance = balances
+                    self.has_api_keys = True
                 else:
-                    self.connection_message = "Could not find user to save keys."
+                    yield rx.toast.error("Could not find user to save keys.")
+                    return
             finally:
                 db.close()
+        yield rx.toast.success("API Keys saved and validated successfully!")
+        yield ExchangeState.refresh_balances
         yield ExchangeState.fetch_trading_pairs
 
     @rx.event
@@ -117,51 +109,36 @@ class ExchangeState(rx.State):
         return SessionLocal()
 
     @rx.event(background=True)
-    async def test_connection(self):
-        api_key = self.api_keys["api_key"]
-        secret_key = self.api_keys["secret_key"]
-        if not api_key or not secret_key:
-            async with self:
-                self.is_connected = False
-                self.connection_message = "API keys not set."
-            return
-        is_testnet_mode = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
-        logging.info(f"Testing connection to Binance. Testnet: {is_testnet_mode}")
+    async def refresh_balances(self):
+        if not self.has_api_keys:
+            return rx.toast.info("Please save your API keys first.")
         try:
-            client = Client(api_key, secret_key, testnet=is_testnet_mode)
+            client = Client(
+                self.api_keys["api_key"],
+                self.api_keys["secret_key"],
+                testnet=self.is_testnet,
+            )
             account_info = client.get_account()
             async with self:
-                self.is_connected = True
-                self.connection_message = f"Successfully connected to Binance ({('Testnet' if is_testnet_mode else 'Live')})."
                 balances = [
                     WalletBalance(**bal)
                     for bal in account_info.get("balances", [])
                     if float(bal.get("free", 0)) > 0 or float(bal.get("locked", 0)) > 0
                 ]
                 self.account_balance = balances
-            yield ExchangeState.fetch_trading_pairs
-        except BinanceAPIException as e:
-            logging.exception(f"Binance API Error: {e}")
-            is_testnet_mode = (
-                os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
-            )
-            async with self:
-                self.is_connected = False
-                self.connection_message = f"Connection failed ({('Testnet' if is_testnet_mode else 'Live')}): {e.message}"
-                self.api_keys = {"api_key": "", "secret_key": ""}
+                from datetime import datetime
+
+                self.last_balance_refresh = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return rx.toast.success("Balances refreshed successfully.")
         except Exception as e:
-            logging.exception(f"Unexpected connection error: {e}")
-            is_testnet_mode = (
-                os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
-            )
+            logging.exception(f"Error refreshing balances: {e}")
             async with self:
-                self.is_connected = False
-                self.connection_message = f"An unexpected error occurred ({('Testnet' if is_testnet_mode else 'Live')}): {e}"
-                self.api_keys = {"api_key": "", "secret_key": ""}
+                self.account_balance = []
+            return rx.toast.error("Failed to refresh balances.")
 
     @rx.event(background=True)
     async def fetch_trading_pairs(self):
-        if not self.is_connected:
+        if not self.has_api_keys:
             return
         try:
             client = Client(
@@ -179,8 +156,6 @@ class ExchangeState(rx.State):
                 self.trading_pairs = sorted(pairs)
         except Exception as e:
             logging.exception(f"Error fetching trading pairs: {e}")
-            async with self:
-                self.connection_message = f"Failed to fetch trading pairs: {e}"
 
     @rx.event(background=True)
     async def connect_binance_on_load(self):
@@ -196,10 +171,15 @@ class ExchangeState(rx.State):
             user = crud.get_user_by_email(db, auth_state.current_user["email"])
             if user and user.encrypted_api_key:
                 keys = crud.get_user_api_keys(db, user.id)
-                if keys:
+                if keys and keys.get("api_key") and keys.get("secret_key"):
                     async with self:
                         self.api_keys = keys
-                    await self.test_connection()
+                        self.has_api_keys = True
+                    yield ExchangeState.refresh_balances
+                    yield ExchangeState.fetch_trading_pairs
+                else:
+                    async with self:
+                        self.has_api_keys = False
         finally:
             db.close()
 
@@ -210,10 +190,10 @@ class ExchangeState(rx.State):
             from app.states.auth_state import AuthState
 
             self.api_keys = {"api_key": "", "secret_key": ""}
-            self.is_connected = False
-            self.connection_message = "API keys cleared."
+            self.has_api_keys = False
             self.account_balance = []
             self.trading_pairs = []
+            self.last_balance_refresh = ""
             auth_state = await self.get_state(AuthState)
             if auth_state.current_user:
                 db = self.get_db()
@@ -223,13 +203,13 @@ class ExchangeState(rx.State):
                         crud.update_user_api_keys(db, user.id, "", "")
                 finally:
                     db.close()
-        return rx.redirect("/settings")
+        return rx.toast.info("API Keys cleared.")
 
     async def _get_async_client(self) -> AsyncClient | None:
         api_key = self.api_keys["api_key"]
         secret_key = self.api_keys["secret_key"]
-        if not self.is_connected or not api_key or (not secret_key):
-            logging.error("Cannot create async client, not connected or keys not set.")
+        if not self.has_api_keys or not api_key or (not secret_key):
+            logging.error("Cannot create async client, API keys not set or validated.")
             return None
         try:
             is_testnet_mode = (

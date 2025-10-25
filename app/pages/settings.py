@@ -52,59 +52,44 @@ def api_key_form() -> rx.Component:
                 class_name="mb-6",
             ),
             rx.el.button(
-                "Save & Connect",
+                "Save API Keys",
                 type="submit",
                 class_name="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500",
             ),
             on_submit=ExchangeState.save_api_keys,
         ),
+        rx.el.button(
+            rx.icon("trash-2", class_name="w-4 h-4 mr-2"),
+            "Clear API Keys",
+            on_click=ExchangeState.clear_api_keys,
+            class_name="mt-4 w-full flex justify-center py-2 px-4 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500",
+        ),
         class_name="p-6 bg-white rounded-lg shadow-md",
-    )
-
-
-def connection_status() -> rx.Component:
-    return rx.el.div(
-        rx.el.h2("Connection Status", class_name="text-xl font-bold text-gray-800"),
-        rx.el.div(
-            rx.el.div(
-                rx.icon(
-                    rx.cond(ExchangeState.is_connected, "check-circle-2", "x-circle"),
-                    class_name="h-6 w-6",
-                ),
-                rx.el.p(
-                    rx.cond(ExchangeState.is_connected, "Connected", "Not Connected"),
-                    class_name="font-semibold",
-                ),
-                class_name=rx.cond(
-                    ExchangeState.is_connected,
-                    "flex items-center gap-2 text-green-600",
-                    "flex items-center gap-2 text-red-600",
-                ),
-            ),
-            rx.el.p(
-                ExchangeState.connection_message,
-                class_name="text-sm text-gray-500 mt-1",
-            ),
-            class_name="mt-2",
-        ),
-        rx.cond(
-            ExchangeState.is_connected,
-            rx.el.button(
-                "Disconnect",
-                on_click=ExchangeState.clear_api_keys,
-                class_name="mt-4 w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500",
-            ),
-            None,
-        ),
-        class_name="p-6 bg-white rounded-lg shadow-md mt-6",
     )
 
 
 def wallet_balances() -> rx.Component:
     return rx.el.div(
-        rx.el.h2("Wallet Balances", class_name="text-xl font-bold text-gray-800 mb-4"),
+        rx.el.div(
+            rx.el.h2("Wallet Balances", class_name="text-xl font-bold text-gray-800"),
+            rx.el.button(
+                rx.icon("refresh-cw", class_name="w-4 h-4 mr-2"),
+                "Refresh",
+                on_click=ExchangeState.refresh_balances,
+                class_name="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700",
+            ),
+            class_name="flex justify-between items-center mb-2",
+        ),
         rx.cond(
-            ExchangeState.is_connected,
+            ExchangeState.last_balance_refresh != "",
+            rx.el.p(
+                f"Last updated: {ExchangeState.last_balance_refresh}",
+                class_name="text-xs text-gray-500 mb-4",
+            ),
+            None,
+        ),
+        rx.cond(
+            ExchangeState.has_api_keys,
             rx.el.div(
                 rx.el.div(
                     rx.el.div("Asset", class_name="font-semibold"),
@@ -131,16 +116,17 @@ def wallet_balances() -> rx.Component:
                     ),
                     class_name="max-h-96 overflow-y-auto",
                 ),
-                class_name="bg-white rounded-lg shadow-md p-6 mt-6",
             ),
             rx.el.div(
+                rx.icon("key-round", class_name="h-12 w-12 text-gray-300"),
                 rx.el.p(
-                    "Connect to Binance to see your wallet balances.",
-                    class_name="text-gray-500",
+                    "Save your API keys to see wallet balances.",
+                    class_name="text-gray-500 mt-4",
                 ),
-                class_name="bg-white rounded-lg shadow-md p-6 mt-6 text-center",
+                class_name="text-center flex flex-col items-center justify-center p-8",
             ),
         ),
+        class_name="bg-white rounded-lg shadow-md p-6",
     )
 
 
@@ -150,9 +136,9 @@ def settings_page() -> rx.Component:
             "Exchange Settings", class_name="text-3xl font-bold text-gray-800 mb-6"
         ),
         rx.el.div(
-            rx.el.div(api_key_form(), connection_status(), class_name="space-y-6"),
+            api_key_form(),
             wallet_balances(),
-            class_name="grid grid-cols-1 lg:grid-cols-2 gap-6",
+            class_name="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start",
         ),
         on_mount=ExchangeState.connect_binance_on_load,
     )
