@@ -12,6 +12,7 @@ class BotConfig(TypedDict):
     safety_order_volume_scale: float
     safety_order_step_scale: float
     max_safety_orders: int
+    immediate_safety_orders: int
     price_deviation: float
     take_profit_percentage: float
 
@@ -51,6 +52,7 @@ class BotsState(rx.State):
         "safety_order_volume_scale": 1.5,
         "safety_order_step_scale": 1.2,
         "max_safety_orders": 5,
+        "immediate_safety_orders": 1,
         "price_deviation": 1.0,
         "take_profit_percentage": 2.0,
     }
@@ -88,8 +90,22 @@ class BotsState(rx.State):
                     f"Could not convert '{value}' for config field '{name}': {e}"
                 )
 
+    @rx.var
+    def required_balance(self) -> float:
+        config = self.current_bot_config
+        base_order_cost = config["base_order_size"]
+        safety_orders_cost = sum(
+            (
+                config["safety_order_size"] * config["safety_order_volume_scale"] ** i
+                for i in range(config["immediate_safety_orders"])
+            )
+        )
+        return base_order_cost + safety_orders_cost
+
     @rx.event
     async def add_bot(self):
+        from app.states.exchange_state import ExchangeState
+
         auth_state = await self.get_state(AuthState)
         user = cast(User, auth_state.current_user)
         if not user:
@@ -100,6 +116,15 @@ class BotsState(rx.State):
         if user["subscription_tier"] == "PRO" and len(self.bots) >= 5:
             return rx.toast.info(
                 "You have reached the maximum bot limit for your PRO plan."
+            )
+        exchange_state = await self.get_state(ExchangeState)
+        balance_ok, current_balance = await exchange_state.validate_balance(
+            "USDT", self.required_balance
+        )
+        if not balance_ok:
+            return rx.toast.error(
+                f"Insufficient balance. Need {self.required_balance:.2f} USDT, have {current_balance:.2f} USDT.",
+                duration=5000,
             )
         new_bot_id = str(uuid.uuid4())
         new_bot = Bot(

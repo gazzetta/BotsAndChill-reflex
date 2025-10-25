@@ -128,6 +128,33 @@ def create_bot_wizard() -> rx.Component:
                 ),
                 wizard_step(
                     4,
+                    "Immediate Safety Orders",
+                    True,
+                    rx.el.div(
+                        config_input_field(
+                            "Immediate Safety Orders",
+                            "immediate_safety_orders",
+                            BotsState.current_bot_config["immediate_safety_orders"],
+                            type="number",
+                        ),
+                        rx.el.p(
+                            "These orders will be placed as limit orders immediately when the bot starts.",
+                            class_name="text-xs text-gray-500 mt-1 col-span-2",
+                        ),
+                        rx.el.div(
+                            rx.el.p(
+                                "Required USDT to start:", class_name="font-medium"
+                            ),
+                            rx.el.p(
+                                f"${BotsState.required_balance.to_string()}",
+                                class_name="font-bold text-teal-600",
+                            ),
+                            class_name="mt-2 p-2 bg-gray-50 rounded-md flex justify-between items-center text-sm",
+                        ),
+                    ),
+                ),
+                wizard_step(
+                    5,
                     "Take Profit",
                     True,
                     config_input_field(

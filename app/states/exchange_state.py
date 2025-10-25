@@ -178,21 +178,26 @@ class ExchangeState(rx.State):
                 await client.close_connection()
 
     @rx.event
-    async def validate_balance(self, asset: str, required_amount: float) -> bool:
+    async def validate_balance(
+        self, asset: str, required_amount: float
+    ) -> tuple[bool, float]:
         client = await self._get_async_client()
         if not client:
-            return False
+            return (False, 0.0)
+        available_balance = 0.0
         try:
             balance = await client.get_asset_balance(asset=asset)
-            if balance and float(balance["free"]) >= required_amount:
-                return True
+            if balance:
+                available_balance = float(balance["free"])
+            if available_balance >= required_amount:
+                return (True, available_balance)
             logging.warning(
-                f"Insufficient balance for {asset}. Required: {required_amount}, Available: {(balance['free'] if balance else '0')}"
+                f"Insufficient balance for {asset}. Required: {required_amount}, Available: {available_balance}"
             )
-            return False
+            return (False, available_balance)
         except Exception as e:
             logging.exception(f"Error validating balance for {asset}: {e}")
-            return False
+            return (False, available_balance)
         finally:
             if client:
                 await client.close_connection()
