@@ -178,6 +178,37 @@ class ExchangeState(rx.State):
                 await client.close_connection()
 
     @rx.event
+    async def place_limit_order(
+        self, pair: str, side: str, quantity: float, price: float
+    ) -> dict | None:
+        client = await self._get_async_client()
+        if not client:
+            return None
+        try:
+            logging.info(
+                f"Placing limit {side} order for {quantity} of {pair} at price {price}"
+            )
+            order = await client.create_order(
+                symbol=pair,
+                side=side.upper(),
+                type="LIMIT",
+                timeInForce="GTC",
+                quantity=quantity,
+                price=f"{price:.8f}",
+            )
+            logging.info(f"Limit order successful: {order}")
+            return order
+        except BinanceAPIException as e:
+            logging.exception(f"Binance API error placing limit order: {e}")
+            return None
+        except Exception as e:
+            logging.exception(f"Unexpected error placing limit order: {e}")
+            return None
+        finally:
+            if client:
+                await client.close_connection()
+
+    @rx.event
     async def validate_balance(
         self, asset: str, required_amount: float
     ) -> tuple[bool, float]:

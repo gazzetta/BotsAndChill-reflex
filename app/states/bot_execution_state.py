@@ -128,7 +128,7 @@ class BotExecutionState(rx.State):
             pair_info = bot["config"]["pair"]
             base_currency = "USDT"
             required_usdt = bot["config"]["base_order_size"]
-            balance_ok = await exchange_state.validate_balance(
+            balance_ok, _ = await exchange_state.validate_balance(
                 base_currency, required_usdt
             )
             if not balance_ok:
@@ -142,13 +142,13 @@ class BotExecutionState(rx.State):
                 bots_state.set_bot_status(bot_id, "error")
                 logging.error(f"Base order failed for bot {bot_id}: {order_result}")
                 return False
-            filled_price = float(order_result["fills"][0]["price"])
+            base_order_price = float(order_result["fills"][0]["price"])
             filled_qty = float(order_result["executedQty"])
             base_order = Order(
                 order_id=str(order_result["orderId"]),
                 timestamp=order_result["transactTime"] / 1000,
                 side="buy",
-                price=filled_price,
+                price=base_order_price,
                 quantity=filled_qty,
                 order_type="base",
                 status="filled",
@@ -165,7 +165,43 @@ class BotExecutionState(rx.State):
                 email_service.send_bot_notification_email(
                     to_email=auth_state.current_user["email"],
                     bot_name=bot["name"],
-                    message=f"A new deal has been started for pair {bot['config']['pair']}. Base order filled at {filled_price}.",
+                    message=f"A new deal has been started for pair {bot['config']['pair']}. Base order filled at {base_order_price}.",
+                )
+            config = bot["config"]
+            for i in range(config["immediate_safety_orders"]):
+                deviation = (
+                    config["price_deviation"] * config["safety_order_step_scale"] ** i
+                )
+                limit_price = base_order_price * (1 - deviation / 100)
+                so_quantity_usdt = (
+                    config["safety_order_size"]
+                    * config["safety_order_volume_scale"] ** i
+                )
+                so_quantity_asset = so_quantity_usdt / limit_price
+                so_result = await exchange_state.place_limit_order(
+                    pair=config["pair"],
+                    side="BUY",
+                    quantity=so_quantity_asset,
+                    price=limit_price,
+                )
+                if not so_result:
+                    bots_state.set_bot_status(bot_id, "error")
+                    logging.error(
+                        f"Failed to place immediate safety order #{i + 1} for bot {bot_id}"
+                    )
+                    return False
+                safety_order = Order(
+                    order_id=str(so_result["orderId"]),
+                    timestamp=so_result["transactTime"] / 1000,
+                    side="buy",
+                    price=float(so_result["price"]),
+                    quantity=float(so_result["origQty"]),
+                    order_type="safety",
+                    status="new",
+                )
+                deal_state.add_safety_order(bot_id, safety_order)
+                logging.info(
+                    f"Successfully placed immediate safety order #{i + 1} for bot {bot_id} at price {limit_price}"
                 )
         return True
 
