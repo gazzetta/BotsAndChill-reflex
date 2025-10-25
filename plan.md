@@ -1,7 +1,7 @@
 # 3commas Clone - DCA Bot Trading Platform
 
 ## Current Goal
-✅ Password hashing with bcrypt and email verification implemented successfully!
+✅ Phase 10: Complete Database Integration implemented successfully!
 
 ---
 
@@ -167,9 +167,60 @@
 
 ---
 
+## Phase 10: Complete Database Integration ✅
+**Goal**: Fix critical gaps by connecting all state management to persistent database storage.
+
+### 10.1: Enhanced CRUD Operations ✅
+- [x] Add comprehensive bot CRUD functions (create, read, update, delete)
+- [x] Implement deal persistence with full lifecycle support
+- [x] Add order tracking with status updates
+- [x] Create get_all_running_bots() for startup recovery
+- [x] Build update_bot_stats() for P/L and deal count tracking
+
+### 10.2: BotsState Database Migration ✅
+- [x] Load bots from database on app startup using user_id
+- [x] Persist new bots to database in add_bot()
+- [x] Update bot status in database via set_bot_status()
+- [x] Update bot statistics in database via update_bot_stats()
+- [x] Delete bots from database in remove_bot()
+- [x] Sync in-memory bot list with database
+
+### 10.3: DealState Database Migration ✅
+- [x] Load active deals from database on page load
+- [x] Persist deals to database in create_deal()
+- [x] Save orders to database when created
+- [x] Update deals in database when modified
+- [x] Close deals in database with realized P/L
+
+### 10.4: Bot Cleanup on Stop ✅
+- [x] Cancel pending limit orders on Binance when bot stopped
+- [x] Implement _cancel_pending_orders() helper method
+- [x] Update database with final deal state on stop
+- [x] Graceful WebSocket cleanup with order cancellation
+
+### 10.5: Auto-Restart on App Startup ✅
+- [x] Query database for running bots on startup
+- [x] Resume WebSocket connections for active bots
+- [x] Restore deal monitoring and price streaming
+- [x] Add on_load handler to trigger restore_active_bots()
+
+### 10.6: Balance Retry Mechanism ✅
+- [x] Create poll_balances_for_pending_orders() background task
+- [x] Check bots in 'waiting_for_balance' status every 60 seconds
+- [x] Retry safety order placement when balance available
+- [x] Update bot status back to 'monitoring' on success
+
+### 10.7: Error Recovery UI ✅
+- [x] Add "Retry" button for bots in 'error' status
+- [x] Implement reset_bot_error() event handler
+- [x] Allow bot restart after error state cleared
+- [x] Show error reason in UI with recovery options
+
+---
+
 ## Summary: Complete Implementation ✅
 
-**All 9 Phases Completed** (96/96 tasks)
+**All 10 Phases Completed** (103/103 tasks)
 
 ### Key Features Delivered:
 ✅ **User Authentication**: Register, login, session management with FREE/PRO tiers  
@@ -180,8 +231,17 @@
 ✅ **Deal Management**: Complete deal lifecycle with P/L tracking  
 ✅ **Polar Subscriptions**: $10/month PRO plan with webhook integration  
 ✅ **Analytics Dashboard**: Performance metrics, charts, CSV export  
-✅ **Database Persistence**: SQLite with encrypted API keys  
+✅ **Database Persistence**: SQLite with encrypted API keys + full CRUD operations  
 ✅ **Testnet Support**: Safe testing environment without real funds  
+✅ **Production Ready**: Auto-restart, balance retry, error recovery, order cleanup  
+
+### Critical Gaps Fixed:
+✅ **Gap #1 - Database Persistence**: All bots, deals, orders, and stats now persist to SQLite  
+✅ **Gap #2 - Order Cleanup**: Pending limit orders canceled on bot stop  
+✅ **Gap #3 - Auto-Restart**: Running bots resume on app startup  
+✅ **Gap #4 - Balance Handling**: Automatic retry when funds become available  
+✅ **Gap #5 - Error Recovery**: UI button to reset and retry failed bots  
+✅ **Gap #6 - Statistics Persistence**: P/L and deal counts saved to database  
 
 ### Environment Setup Required:
 ```bash
@@ -191,42 +251,37 @@ DATABASE_URL=sqlite:///./app.db
 BINANCE_TESTNET=true  # or false for live trading
 POLAR_ACCESS_TOKEN=<your-polar-token>
 POLAR_WEBHOOK_SECRET=<your-webhook-secret>
+RESEND_API_KEY=<your-resend-key>  # for email notifications
 ```
 
-### Security Features:
-- **Password Hashing**: bcrypt with automatic salting (12 rounds)
-- **Password Requirements**: Min 8 chars, uppercase, lowercase, number
-- **Email Verification**: UUID tokens with 24-hour expiration
-- **API Key Encryption**: Fernet symmetric encryption for Binance keys
-- **Session Management**: Secure token-based authentication
+### Database Features:
+- **Persistent Storage**: All data survives app restarts
+- **Encrypted API Keys**: Binance keys stored with Fernet encryption
+- **Relational Integrity**: Proper foreign keys (User → Bot → Deal → Order)
+- **Transaction Safety**: All CRUD operations use database transactions
+- **Auto-Recovery**: Running bots automatically resume on startup
+- **Order Cleanup**: Pending orders canceled when bots stopped
 
-### Registration Flow:
-1. User submits registration form with email/password
-2. Password validated for strength requirements
-3. Password hashed with bcrypt before storage
-4. Verification token generated (UUID + 24h expiration)
-5. Verification link logged to console (for demo)
-6. User receives toast notification with link
-7. Email marked as unverified, login blocked
-8. User clicks verification link → email verified
-9. User can now log in with hashed password
-
-### Testnet Setup:
-1. Visit: https://testnet.binance.vision/
-2. Login with GitHub account
-3. Generate API Key & Secret Key
-4. Add keys via Settings page
-5. Start bot with test funds!
+### Production Workflow:
+1. **App Starts** → Load running bots from database → Resume WebSockets
+2. **Bot Created** → Validate balance → Save to database → Place base order
+3. **Deal Active** → Monitor price → Place safety orders → Update database
+4. **Balance Low** → Enter waiting state → Poll every 60s → Resume when funded
+5. **Take Profit Hit** → Close deal → Save stats → Auto-restart new cycle
+6. **Bot Stopped** → Cancel pending orders → Update database → Clean up
+7. **App Restarts** → Resume all running bots automatically
 
 ---
 
 ## Notes
 - SQLite used for development; can migrate to PostgreSQL for production
 - Testnet mode enables safe strategy testing without risking real funds
-- All data persists across app restarts with database storage
+- All bots and deals persist across restarts with database storage
+- Pending orders automatically canceled when bots stopped for safety
+- Running bots resume automatically on app startup
+- Balance retry mechanism prevents bot failures due to temporary insufficient funds
+- Error recovery UI allows users to reset and restart failed bots
 - Passwords secured with bcrypt (industry-standard hashing)
 - Email verification prevents spam accounts and validates user identity
-- Verification tokens expire after 24 hours for security
 - API keys encrypted with Fernet symmetric encryption
-- Database schema supports future features (grid bots, multiple exchanges)
-- For production: configure SMTP for real email sending (currently logs to console)
+- For production: configure SMTP via Resend for real email sending

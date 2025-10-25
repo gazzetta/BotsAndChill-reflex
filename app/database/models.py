@@ -34,6 +34,7 @@ class User(Base):
 class Bot(Base):
     __tablename__ = "bots"
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, index=True)
     status = Column(String, default="stopped")
     config = Column(JSON)
@@ -41,7 +42,7 @@ class Bot(Base):
     deals_count = Column(Integer, default=0)
     user_id = Column(Integer, ForeignKey("users.id"))
     owner = relationship("User", back_populates="bots")
-    deals = relationship("Deal", back_populates="bot")
+    deals = relationship("Deal", back_populates="bot", cascade="all, delete-orphan")
 
 
 class Deal(Base):
@@ -56,7 +57,7 @@ class Deal(Base):
     total_quantity = Column(Float, default=0.0)
     bot_id = Column(Integer, ForeignKey("bots.id"))
     bot = relationship("Bot", back_populates="deals")
-    orders = relationship("Order", back_populates="deal")
+    orders = relationship("Order", back_populates="deal", cascade="all, delete-orphan")
 
 
 class Order(Base):
