@@ -10,11 +10,12 @@ from contextlib import AsyncExitStack
 from app.services.email_service import EmailService
 from app.states.auth_state import AuthState
 
+active_sockets: dict[str, AsyncExitStack] = {}
+order_monitoring_task: asyncio.Task | None = None
+
 
 class BotExecutionState(rx.State):
-    active_sockets: dict[str, AsyncExitStack] = {}
     bot_prices: dict[str, float] = {}
-    order_monitoring_task: asyncio.Task | None = None
 
     @rx.event(background=True)
     async def poll_balances_for_pending_orders(self):
@@ -57,7 +58,7 @@ class BotExecutionState(rx.State):
             )
             bsm = BinanceSocketManager(client)
             trade_socket = bsm.trade_socket(bot["config"]["pair"])
-            self.active_sockets[bot_id] = trade_socket
+            active_sockets[bot_id] = trade_socket
             bots_state = await self.get_state(BotsState)
             bots_state.set_bot_status(bot_id, "starting")
             base_order_placed = await self._place_base_order(bot_id)
@@ -70,11 +71,10 @@ class BotExecutionState(rx.State):
             async with self:
                 bots_state = await self.get_state(BotsState)
                 bots_state.set_bot_status(bot_id, "monitoring")
-            if not self.order_monitoring_task or self.order_monitoring_task.done():
-                task = asyncio.create_task(self._monitor_open_orders())
-                async with self:
-                    self.order_monitoring_task = task
-            if not self.active_sockets:
+            global order_monitoring_task
+            if not order_monitoring_task or order_monitoring_task.done():
+                order_monitoring_task = asyncio.create_task(self._monitor_open_orders())
+            if not active_sockets:
                 yield BotExecutionState.poll_balances_for_pending_orders
         logging.info(
             f"Starting trade socket for bot {bot_id} on pair {bot['config']['pair']}"
@@ -82,7 +82,7 @@ class BotExecutionState(rx.State):
         try:
             async with trade_socket as ts:
                 while True:
-                    if bot_id not in self.active_sockets:
+                    if bot_id not in active_sockets:
                         logging.info(
                             f"Socket for bot {bot_id} closed, exiting listener."
                         )
@@ -110,15 +110,14 @@ class BotExecutionState(rx.State):
         finally:
             logging.info(f"Closing connection for bot {bot_id}")
             await client.close_connection()
-            async with self:
-                if bot_id in self.active_sockets:
-                    del self.active_sockets[bot_id]
+            if bot_id in active_sockets:
+                del active_sockets[bot_id]
 
     @rx.event(background=True)
     async def stop_bot_execution(self, bot_id: str):
+        if bot_id in active_sockets:
+            del active_sockets[bot_id]
         async with self:
-            if bot_id in self.active_sockets:
-                del self.active_sockets[bot_id]
             if bot_id in self.bot_prices:
                 del self.bot_prices[bot_id]
         logging.info(f"Stopped execution and cleaned up for bot {bot_id}.")

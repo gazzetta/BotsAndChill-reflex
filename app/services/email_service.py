@@ -1,22 +1,27 @@
 import reflex as rx
 import os
 import logging
+import resend
 
 
 class EmailService(rx.State):
-    @rx.var
-    def resend_api_key(self) -> str:
-        return os.environ.get("RESEND_API_KEY", "")
-
     def _send_email(self, to_email: str, subject: str, html_body: str):
-        if not self.resend_api_key:
+        api_key = os.environ.get("RESEND_API_KEY")
+        if not api_key:
             logging.error("RESEND_API_KEY not set. Cannot send email.")
+            logging.info(f"Email intended for {to_email} with subject '{subject}'")
             return
+        resend.api_key = api_key
+        from_address = os.environ.get("EMAIL_FROM_ADDRESS", "onboarding@resend.dev")
+        params = {
+            "from": from_address,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+        }
         try:
-            logging.info(f"Would send email to {to_email}")
-            logging.info(f"Subject: {subject}")
-            logging.info(f"Body: {html_body}")
-            logging.info("Email service simulated successfully")
+            email = resend.Emails.send(params)
+            logging.info(f"Email sent successfully to {to_email}: {email}")
         except Exception as e:
             logging.exception(f"Failed to send email to {to_email}: {e}")
 

@@ -39,7 +39,12 @@ class AuthState(rx.State):
         return True
 
     async def _send_verification_email_async(self, user: models.User):
-        verification_link = f"{self.router.page.full_raw_url.replace('/register', '').replace('/login', '')}/verify-email/{user.verification_token}"
+        base_url = (
+            self.router.page.full_raw_url.split("/")[0]
+            + "//"
+            + self.router.page.full_raw_url.split("/")[2]
+        )
+        verification_link = f"{base_url}/verify-email/{user.verification_token}"
         email_service = await self.get_state(EmailService)
         email_service.send_verification_email(user.email, verification_link)
         return rx.toast.info(

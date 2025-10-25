@@ -1,12 +1,17 @@
 from cryptography.fernet import Fernet
 import os
 import bcrypt
+import logging
 
 
 def get_fernet() -> Fernet:
     key = os.environ.get("ENCRYPTION_KEY")
     if not key:
-        raise ValueError("ENCRYPTION_KEY environment variable not set.")
+        logging.warning(
+            "ENCRYPTION_KEY not set, generating a temporary one. For production, set a permanent key in your environment."
+        )
+        key = Fernet.generate_key().decode()
+        os.environ["ENCRYPTION_KEY"] = key
     return Fernet(key.encode())
 
 
