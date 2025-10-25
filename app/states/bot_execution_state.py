@@ -209,16 +209,18 @@ class BotExecutionState(rx.State):
         num_safety_orders = len(deal["safety_orders"])
         if num_safety_orders >= config["max_safety_orders"]:
             return
-        last_price = (
-            deal["safety_orders"][-1]["price"]
-            if deal["safety_orders"]
-            else deal["base_order"]["price"]
-        )
+        last_price = deal["base_order"]["price"]
         price_deviation_needed = (
             config["price_deviation"]
             * config["safety_order_step_scale"] ** num_safety_orders
         )
-        trigger_price = last_price * (1 - price_deviation_needed / 100)
+        trigger_price = deal["base_order"]["price"] * (1 - price_deviation_needed / 100)
+        cumulative_deviation = config["price_deviation"]
+        for i in range(num_safety_orders):
+            cumulative_deviation += config["price_deviation"] * config[
+                "safety_order_step_scale"
+            ] ** (i + 1)
+        trigger_price = deal["base_order"]["price"] * (1 - cumulative_deviation / 100)
         if current_price <= trigger_price:
             logging.info(
                 f"Safety order condition met for bot {bot_id} at price {current_price}."

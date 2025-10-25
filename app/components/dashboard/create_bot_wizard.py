@@ -119,7 +119,7 @@ def create_bot_wizard() -> rx.Component:
                             BotsState.current_bot_config["safety_order_volume_scale"],
                         ),
                         config_input_field(
-                            "Safety Order Step Scale",
+                            "Safety Order Price Deviation Scale",
                             "safety_order_step_scale",
                             BotsState.current_bot_config["safety_order_step_scale"],
                         ),
